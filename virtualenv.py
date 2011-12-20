@@ -825,6 +825,16 @@ def main():
         'This fixes up scripts and makes all .pth files relative')
 
     parser.add_option(
+        '--relocate',
+        dest='relocate_path',
+        action='store',
+        type="string",
+        help='Make an EXISTING virtualenv environment locically located.  '
+        'At a specidfied path.  For instance, for packaging a python '
+        'virtualenv in a debian package, etc.  This fixes up scripts'
+        'and makes all .pth files hard coded to the path')
+
+    parser.add_option(
         '--distribute',
         dest='use_distribute',
         action='store_true',
@@ -912,6 +922,10 @@ def main():
 
     if options.relocatable:
         make_environment_relocatable(home_dir)
+        return
+
+    if options.relocate_path:
+        make_environment_relocatable(home_dir, options.relocate_path)
         return
 
     if options.no_site_packages:
@@ -1521,7 +1535,7 @@ def is_executable(exe):
 ############################################################
 ## Relocating the environment:
 
-def make_environment_relocatable(home_dir):
+def make_environment_relocatable(home_dir, prefix=None):
     """
     Makes the already-existing environment use relative paths, and takes out
     the #!-based environment selection in scripts.
@@ -1532,19 +1546,24 @@ def make_environment_relocatable(home_dir):
         logger.fatal(
             'The environment doesn\'t have a file %s -- please re-run virtualenv '
             'on this environment to update it' % activate_this)
-    fixup_scripts(home_dir)
+    fixup_scripts(home_dir, prefix)
     fixup_pth_and_egg_link(home_dir)
     ## FIXME: need to fix up distutils.cfg
 
 OK_ABS_SCRIPTS = ['python', 'python%s' % sys.version[:3],
                   'activate', 'activate.bat', 'activate_this.py']
 
-def fixup_scripts(home_dir):
+def fixup_scripts(home_dir, prefix=None):
     # This is what we expect at the top of scripts:
     shebang = '#!%s/bin/python' % os.path.normcase(os.path.abspath(home_dir))
     # This is what we'll put:
-    new_shebang = '#!/usr/bin/env python%s' % sys.version[:3]
-    activate = "import os; activate_this=os.path.join(os.path.dirname(os.path.realpath(__file__)), 'activate_this.py'); execfile(activate_this, dict(__file__=activate_this)); del os, activate_this"
+    if prefix is not None:
+        new_shebang = '#!%s/bin/python' % os.path.normcase(os.path.abspath(prefix))
+        new_lines = [new_shebang+'\n']
+    else:
+        new_shebang = '#!/usr/bin/env python%s' % sys.version[:3]
+        new_lines = [new_shebang+'\n', "import os; activate_this=os.path.join(os.path.dirname(os.path.realpath(__file__)), 'activate_this.py'); execfile(activate_this, dict(__file__=activate_this)); del os, activate_this"]
+
     if sys.platform == 'win32':
         bin_suffix = 'Scripts'
     else:
@@ -1565,14 +1584,22 @@ def fixup_scripts(home_dir):
         if not lines[0].strip().startswith(shebang):
             if os.path.basename(filename) in OK_ABS_SCRIPTS:
                 logger.debug('Cannot make script %s relative' % filename)
+                continue
             elif lines[0].strip() == new_shebang:
                 logger.info('Script %s has already been made relative' % filename)
+                continue
+            elif "/bin/python" in lines[0]:
+                "Maybe it's already moved, so we want to fix it up."
+                pass
             else:
                 logger.warn('Script %s cannot be made relative (it\'s not a normal script that starts with %s)'
                             % (filename, shebang))
-            continue
-        logger.notify('Making script %s relative' % filename)
-        lines = [new_shebang+'\n', activate+'\n'] + lines[1:]
+                continue
+        if prefix is None:
+            logger.notify('Making script %s relative' % filename)
+        else:
+            logger.notify('Making script %s use %s' % (filename, prefix))
+        lines = new_lines + lines[1:]
         f = open(filename, 'wb')
         f.writelines(lines)
         f.close()
