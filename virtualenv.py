@@ -1546,8 +1546,16 @@ def make_environment_relocatable(home_dir, prefix=None):
         logger.fatal(
             'The environment doesn\'t have a file %s -- please re-run virtualenv '
             'on this environment to update it' % activate_this)
+
     fixup_scripts(home_dir, prefix)
-    fixup_pth_and_egg_link(home_dir)
+
+    # since this is used for both --relocate and --relocateable, we'll skip this
+    # fixup step if a prefix is being used which indicates --relocate.
+    # We think egg_links only come from -e deps, which will have absolute paths that don't
+    # need to be made relocateable
+    if not prefix:
+        fixup_pth_and_egg_link(home_dir)
+
     ## FIXME: need to fix up distutils.cfg
 
 OK_ABS_SCRIPTS = ['python', 'python%s' % sys.version[:3],
